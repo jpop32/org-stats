@@ -2,6 +2,7 @@ package orgstats
 
 import (
 	"context"
+	"github.com/caarlos0/spin"
 	"strings"
 	"time"
 
@@ -22,35 +23,47 @@ func NewStats() Stats {
 }
 
 // Gather a given organization's stats
-func Gather(token, org string, blacklist []string, url string) (Stats, error) {
+func Gather(token, org string, blacklist []string, url string, year int) (Stats, Stats, Stat, error) {
 	var ctx = context.Background()
-	var allStats = NewStats()
+	var contribStats = NewStats()
+	var weeklyStats = NewStats()
+	totalStats := Stat{}
 	client, err := newClient(ctx, token, url)
 	if err != nil {
-		return allStats, err
+		return contribStats, weeklyStats, totalStats, err
 	}
 
 	allRepos, err := repos(ctx, client, org)
 	if err != nil {
-		return allStats, err
+		return contribStats, weeklyStats, totalStats, err
 	}
 
 	for _, repo := range allRepos {
 		if isBlacklisted(blacklist, repo.GetName()) {
 			continue
 		}
-		stats, serr := getStats(ctx, client, org, *repo.Name)
+		var spinner = spin.New("  \033[36m%s Gathering data for '" + repo.GetName() + "'...\033[m")
+		spinner.Start()
+		statsContrib, serr := getContributorStats(ctx, client, org, *repo.Name)
 		if serr != nil {
-			return allStats, serr
+			return contribStats, weeklyStats, totalStats, serr
 		}
-		for _, cs := range stats {
+		for _, cs := range statsContrib {
 			if isBlacklisted(blacklist, cs.Author.GetLogin()) {
 				continue
 			}
-			allStats.add(cs)
+			contribStats.addContrib(cs, year, &totalStats)
 		}
+		statsWeekly, serr := getWeeklyStats(ctx, client, org, *repo.Name)
+		if serr != nil {
+			return contribStats, weeklyStats, totalStats, serr
+		}
+		for _, cs := range statsWeekly {
+			totalStats.Commits += weeklyStats.addWeekly(*repo.Name, cs, year)
+		}
+		spinner.Stop()
 	}
-	return allStats, err
+	return contribStats, weeklyStats, totalStats, err
 }
 
 func isBlacklisted(blacklist []string, s string) bool {
@@ -62,7 +75,7 @@ func isBlacklisted(blacklist []string, s string) bool {
 	return false
 }
 
-func (s Stats) add(cs *github.ContributorStats) {
+func (s Stats) addContrib(cs *github.ContributorStats, year int, totalStats *Stat) {
 	if cs.Author == nil {
 		return
 	}
@@ -71,14 +84,29 @@ func (s Stats) add(cs *github.ContributorStats) {
 	var rms int
 	var commits int
 	for _, week := range cs.Weeks {
+		if year != -1 && week.Week.Year() != year {
+			continue
+		}
 		adds += *week.Additions
+		totalStats.Additions += *week.Additions
 		rms += *week.Deletions
+		totalStats.Deletions += *week.Deletions
 		commits += *week.Commits
 	}
 	stat.Additions += adds
 	stat.Deletions += rms
 	stat.Commits += commits
 	s[*cs.Author.Login] = stat
+}
+
+func (s Stats) addWeekly(repo string, cs *github.WeeklyCommitActivity, year int) int {
+	if year != -1 && cs.Week.Year() != year {
+		return 0
+	}
+	stat := s[repo]
+	stat.Commits += *cs.Total
+	s[repo] = stat
+	return *cs.Total
 }
 
 func repos(ctx context.Context, client *github.Client, org string) ([]*github.Repository, error) {
@@ -100,15 +128,30 @@ func repos(ctx context.Context, client *github.Client, org string) ([]*github.Re
 	return allRepos, nil
 }
 
-func getStats(ctx context.Context, client *github.Client, org, repo string) ([]*github.ContributorStats, error) {
+func getContributorStats(ctx context.Context, client *github.Client, org, repo string) ([]*github.ContributorStats, error) {
 	stats, _, err := client.Repositories.ListContributorsStats(ctx, org, repo)
 	if err != nil {
 		if _, ok := err.(*github.RateLimitError); ok {
 			time.Sleep(time.Duration(15) * time.Second)
-			return getStats(ctx, client, org, repo)
+			return getContributorStats(ctx, client, org, repo)
 		}
 		if _, ok := err.(*github.AcceptedError); ok {
-			return getStats(ctx, client, org, repo)
+			return getContributorStats(ctx, client, org, repo)
+		}
+	}
+	return stats, err
+}
+
+func getWeeklyStats(ctx context.Context, client *github.Client, org, repo string) ([]*github.WeeklyCommitActivity, error) {
+
+	stats, _, err := client.Repositories.ListCommitActivity(ctx, org, repo)
+	if err != nil {
+		if _, ok := err.(*github.RateLimitError); ok {
+			time.Sleep(time.Duration(15) * time.Second)
+			return getWeeklyStats(ctx, client, org, repo)
+		}
+		if _, ok := err.(*github.AcceptedError); ok {
+			return getWeeklyStats(ctx, client, org, repo)
 		}
 	}
 	return stats, err

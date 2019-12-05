@@ -1,11 +1,11 @@
 package main
 
+import "C"
 import (
 	"fmt"
 	"os"
 
-	orgstats "github.com/caarlos0/org-stats/orgstats"
-	"github.com/caarlos0/spin"
+	"github.com/caarlos0/org-stats/orgstats"
 	"github.com/urfave/cli"
 )
 
@@ -15,8 +15,8 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "org-stats"
 	app.Version = version
-	app.Author = "Carlos Alexandro Becker (caarlos0@gmail.com)"
-	app.Usage = "Get the contributor stats summary from all repos of any given organization"
+	app.Authors = []cli.Author{{Name: "Carlos Alexandro Becker", Email: "(caarlos0@gmail.com)"}, {Name: "Jovica Popović", Email: "(jpop32@gmail.com)"}}
+	app.Usage = "Get the contributor and repo stats summary from all repos of any given organization"
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			EnvVar: "GITHUB_TOKEN",
@@ -33,12 +33,17 @@ func main() {
 		},
 		cli.IntFlag{
 			Name:  "top",
-			Usage: "How many users to show",
+			Usage: "How many users/repos to show",
 			Value: 3,
 		},
 		cli.StringFlag{
 			Name:  "github-url",
 			Usage: "Custom GitHub URL (for GitHub Enterprise for example)",
+		},
+		cli.IntFlag{
+			Name:  "year",
+			Usage: "Limit the stats to this year only",
+			Value: -1,
 		},
 	}
 	app.Action = func(c *cli.Context) error {
@@ -52,14 +57,19 @@ func main() {
 		if org == "" {
 			return cli.NewExitError("missing organization name", 1)
 		}
-		var spin = spin.New("  \033[36m%s Gathering data for '" + org + "'...\033[m")
-		spin.Start()
-		allStats, err := orgstats.Gather(token, org, blacklist, c.String("github-url"))
-		spin.Stop()
+		year := c.Int("year")
+		if year != -1 {
+			fmt.Printf("Data gathering started for top %d for year %d.\n", top, year)
+		} else {
+			fmt.Printf("Data gathering started for top %d.\n", top)
+		}
+		contribStats, weeklyStats, totalStats, err := orgstats.Gather(token, org, blacklist, c.String("github-url"), year)
+		fmt.Println("Done!")
+		fmt.Println("")
 		if err != nil {
 			return cli.NewExitError(err.Error(), 1)
 		}
-		printHighlights(allStats, top)
+		printHighlights(contribStats, weeklyStats, totalStats, top)
 		return nil
 	}
 	if err := app.Run(os.Args); err != nil {
@@ -67,7 +77,7 @@ func main() {
 	}
 }
 
-func printHighlights(s orgstats.Stats, top int) {
+func printHighlights(s orgstats.Stats, w orgstats.Stats, totalStats orgstats.Stat, top int) {
 	data := []struct {
 		stats  []orgstats.StatPair
 		trophy string
@@ -104,6 +114,19 @@ func printHighlights(s orgstats.Stats, top int) {
 		}
 		fmt.Printf("\n")
 	}
+
+	fmt.Printf("\033[1mTop %d repos by number of commits:\033[0m\n", top)
+	topRepos := orgstats.Sort(w, orgstats.ExtractCommits)
+	for i := 0; i < top; i++ {
+		w := topRepos[i]
+		fmt.Printf("%s commits, %d\n", w.Key, w.Value)
+	}
+	fmt.Printf("\n")
+
+	fmt.Printf("\033[1mTotals across all repos:\033[0m\n")
+	fmt.Printf("Commits: %d\n", totalStats.Commits)
+	fmt.Printf("Additions: %d\n", totalStats.Additions)
+	fmt.Printf("Deletions: %d\n", totalStats.Deletions)
 }
 
 func emojiForPos(pos int) string {
@@ -111,5 +134,5 @@ func emojiForPos(pos int) string {
 	if pos < len(emojis) {
 		return emojis[pos]
 	}
-	return " "
+	return fmt.Sprint(pos + 1)
 }

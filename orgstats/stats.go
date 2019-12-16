@@ -23,19 +23,19 @@ func NewStats() Stats {
 }
 
 // Gather a given organization's stats
-func Gather(token, org string, blacklist []string, url string, year int) (Stats, Stats, Stat, error) {
+func Gather(token, org string, blacklist []string, url string, year int) (Stats, Stats, Stat, int, error) {
 	var ctx = context.Background()
 	var contribStats = NewStats()
 	var weeklyStats = NewStats()
 	totalStats := Stat{}
 	client, err := newClient(ctx, token, url)
 	if err != nil {
-		return contribStats, weeklyStats, totalStats, err
+		return contribStats, weeklyStats, totalStats, 0, err
 	}
 
 	allRepos, err := repos(ctx, client, org)
 	if err != nil {
-		return contribStats, weeklyStats, totalStats, err
+		return contribStats, weeklyStats, totalStats, 0, err
 	}
 
 	for _, repo := range allRepos {
@@ -46,7 +46,7 @@ func Gather(token, org string, blacklist []string, url string, year int) (Stats,
 		spinner.Start()
 		statsContrib, serr := getContributorStats(ctx, client, org, *repo.Name)
 		if serr != nil {
-			return contribStats, weeklyStats, totalStats, serr
+			return contribStats, weeklyStats, totalStats, 0, serr
 		}
 		for _, cs := range statsContrib {
 			if isBlacklisted(blacklist, cs.Author.GetLogin()) {
@@ -56,14 +56,14 @@ func Gather(token, org string, blacklist []string, url string, year int) (Stats,
 		}
 		statsWeekly, serr := getWeeklyStats(ctx, client, org, *repo.Name)
 		if serr != nil {
-			return contribStats, weeklyStats, totalStats, serr
+			return contribStats, weeklyStats, totalStats, 0, serr
 		}
 		for _, cs := range statsWeekly {
 			totalStats.Commits += weeklyStats.addWeekly(*repo.Name, cs, year)
 		}
 		spinner.Stop()
 	}
-	return contribStats, weeklyStats, totalStats, err
+	return contribStats, weeklyStats, totalStats, len(allRepos), err
 }
 
 func isBlacklisted(blacklist []string, s string) bool {

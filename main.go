@@ -63,13 +63,13 @@ func main() {
 		} else {
 			fmt.Printf("Data gathering started for top %d.\n", top)
 		}
-		contribStats, weeklyStats, totalStats, err := orgstats.Gather(token, org, blacklist, c.String("github-url"), year)
+		contribStats, weeklyStats, totalStats, nrRepos, err := orgstats.Gather(token, org, blacklist, c.String("github-url"), year)
 		fmt.Println("Done!")
 		fmt.Println("")
 		if err != nil {
 			return cli.NewExitError(err.Error(), 1)
 		}
-		printHighlights(contribStats, weeklyStats, totalStats, top)
+		printHighlights(contribStats, weeklyStats, totalStats, nrRepos, top)
 		return nil
 	}
 	if err := app.Run(os.Args); err != nil {
@@ -77,7 +77,7 @@ func main() {
 	}
 }
 
-func printHighlights(s orgstats.Stats, w orgstats.Stats, totalStats orgstats.Stat, top int) {
+func printHighlights(s orgstats.Stats, w orgstats.Stats, totalStats orgstats.Stat, nrRepos int, top int) {
 	data := []struct {
 		stats  []orgstats.StatPair
 		trophy string
@@ -123,7 +123,7 @@ func printHighlights(s orgstats.Stats, w orgstats.Stats, totalStats orgstats.Sta
 	}
 	fmt.Printf("\n")
 
-	fmt.Printf("\033[1mTotals across all repos:\033[0m\n")
+	fmt.Printf("\033[1mTotals across all %d repos:\033[0m\n", nrRepos)
 	fmt.Printf("Commits: %d\n", totalStats.Commits)
 	fmt.Printf("Additions: %d\n", totalStats.Additions)
 	fmt.Printf("Deletions: %d\n", totalStats.Deletions)
